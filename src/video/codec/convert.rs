@@ -698,7 +698,16 @@ impl Nv12Converter {
         let result = match self.src_format {
             PixelFormat::Bgr24 => libyuv::bgr24_to_nv12(input, dst, width, height),
             PixelFormat::Rgb24 => libyuv::rgb24_to_nv12(input, dst, width, height),
-            PixelFormat::Yuyv => libyuv::yuy2_to_nv12(input, dst, width, height),
+            PixelFormat::Yuyv => {
+                yuyv_to_nv12_threaded(
+                    input,
+                    dst,
+                    width as usize,
+                    height as usize,
+                    yuyv_convert_threads(),
+                );
+                Ok(())
+            }
             PixelFormat::Yuv420 => libyuv::i420_to_nv12(input, dst, width, height),
             PixelFormat::Nv21 => libyuv::nv21_to_nv12(input, dst, width, height),
             _ => {
@@ -844,6 +853,67 @@ pub fn yuyv_to_nv12(yuyv: &[u8], nv12: &mut [u8], width: usize, height: usize) {
     if let Err(e) = libyuv::yuy2_to_nv12(yuyv, nv12, width as i32, height as i32) {
         tracing::error!("libyuv YUYV→NV12 conversion failed: {}", e);
     }
+}
+
+/// YUYV(422) → NV12，按偶数行分块多线程转换。
+pub fn yuyv_to_nv12_threaded(
+    yuyv: &[u8],
+    nv12: &mut [u8],
+    width: usize,
+    height: usize,
+    threads: usize,
+) {
+    let y_size = width * height;
+    if width == 0 || height < 2 || height % 2 != 0 {
+        return;
+    }
+    if yuyv.len() < width * height * 2 || nv12.len() < y_size + y_size / 2 {
+        return;
+    }
+    let threads = threads.clamp(1, 8);
+    if threads == 1 || height / 2 < threads * 2 {
+        yuyv_to_nv12(yuyv, nv12, width, height);
+        return;
+    }
+
+    let rows_per = ((height / threads) + 1) & !1usize;
+    let (planes_y, planes_uv) = nv12.split_at_mut(y_size);
+
+    std::thread::scope(|scope| {
+        let mut y_chunks = planes_y.chunks_mut(rows_per * width);
+        let mut uv_chunks = planes_uv.chunks_mut((rows_per / 2) * width);
+        let mut src_chunks = yuyv.chunks(width * 2 * rows_per);
+        while let (Some(yc), Some(uc), Some(sc)) =
+            (y_chunks.next(), uv_chunks.next(), src_chunks.next())
+        {
+            let rows = yc.len() / width;
+            if rows == 0 {
+                break;
+            }
+            scope.spawn(move || {
+                let _ = libyuv::yuy2_to_nv12_strided(
+                    sc,
+                    width * 2,
+                    yc,
+                    width,
+                    uc,
+                    width,
+                    width as i32,
+                    rows as i32,
+                );
+            });
+        }
+    });
+}
+
+fn yuyv_convert_threads() -> usize {
+    static THREADS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *THREADS.get_or_init(|| {
+        std::env::var("ONE_KVM_YUYV_THREADS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(1)
+    })
 }
 
 #[cfg(test)]

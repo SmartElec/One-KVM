@@ -263,6 +263,10 @@ pub(super) fn build_encoder_state(
         };
 
     let needs_mjpeg_decode = config.input_format.is_compressed();
+    // 强制用 libyuv 做 YUYV→NV12（默认关闭，保持原有 YUYV 直通行为）
+    let force_yuyv_convert = std::env::var("ONE_KVM_YUYV_CONVERT").as_deref() == Ok("1")
+        && config.input_format == PixelFormat::Yuyv
+        && !needs_mjpeg_decode;
     let is_rkmpp_available = registry
         .encoder_with_backend(VideoEncoderType::H264, EncoderBackend::Rkmpp)
         .is_some();
@@ -271,10 +275,12 @@ pub(super) fn build_encoder_state(
     let use_yuyv_direct = is_rkmpp_available
         && rkmpp_is_allowed
         && !needs_mjpeg_decode
-        && config.input_format == PixelFormat::Yuyv;
+        && config.input_format == PixelFormat::Yuyv
+        && !force_yuyv_convert;
     let use_rkmpp_direct = is_rkmpp_available
         && rkmpp_is_allowed
         && !needs_mjpeg_decode
+        && !force_yuyv_convert
         && matches!(
             config.input_format,
             PixelFormat::Yuyv
@@ -409,7 +415,11 @@ pub(super) fn build_encoder_state(
     let encoder: Box<dyn VideoEncoderTrait + Send> = match config.output_codec {
         VideoEncoderType::H264 => {
             let codec_name = selected_codec_name.clone();
-            let direct_input_format = h264_direct_input_format(&codec_name, pipeline_input_format);
+            let direct_input_format = if force_yuyv_convert {
+                None
+            } else {
+                h264_direct_input_format(&codec_name, pipeline_input_format)
+            };
             let input_format = direct_input_format.unwrap_or_else(|| {
                 if codec_name.contains("libx264") {
                     H264InputFormat::Yuv420p
@@ -434,7 +444,11 @@ pub(super) fn build_encoder_state(
         }
         VideoEncoderType::H265 => {
             let codec_name = selected_codec_name.clone();
-            let direct_input_format = h265_direct_input_format(&codec_name, pipeline_input_format);
+            let direct_input_format = if force_yuyv_convert {
+                None
+            } else {
+                h265_direct_input_format(&codec_name, pipeline_input_format)
+            };
             let input_format = direct_input_format.unwrap_or_else(|| {
                 if codec_name.contains("libx265") {
                     H265InputFormat::Yuv420p
@@ -508,7 +522,8 @@ pub(super) fn build_encoder_state(
 
     let codec_name = encoder.codec_name();
     let use_direct_input = if codec_name.contains("rkmpp") {
-        matches!(
+        !force_yuyv_convert
+            && matches!(
             pipeline_input_format,
             PixelFormat::Yuyv
                 | PixelFormat::Yuv420

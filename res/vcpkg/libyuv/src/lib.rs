@@ -182,6 +182,41 @@ pub fn yuy2_to_nv12(src: &[u8], dst: &mut [u8], width: i32, height: i32) -> Resu
     ))
 }
 
+/// 分块转换：Y/UV 目标平面分别给出，可多线程并行。
+pub fn yuy2_to_nv12_strided(
+    src: &[u8],
+    src_stride: usize,
+    dst_y: &mut [u8],
+    dst_stride_y: usize,
+    dst_uv: &mut [u8],
+    dst_stride_uv: usize,
+    width: i32,
+    height: i32,
+) -> Result<()> {
+    if width % 2 != 0 || height % 2 != 0 {
+        return Err(YuvError::InvalidDimensions);
+    }
+    let w = width as usize;
+    let h = height as usize;
+    if src.len() < src_stride * h
+        || dst_y.len() < dst_stride_y * h
+        || dst_uv.len() < dst_stride_uv * (h / 2)
+    {
+        return Err(YuvError::BufferTooSmall);
+    }
+
+    call_yuv!(YUY2ToNV12(
+        src.as_ptr(),
+        src_stride as i32,
+        dst_y.as_mut_ptr(),
+        dst_stride_y as i32,
+        dst_uv.as_mut_ptr(),
+        dst_stride_uv as i32,
+        width,
+        height,
+    ))
+}
+
 // ============================================================================
 // UYVY conversions
 // ============================================================================
