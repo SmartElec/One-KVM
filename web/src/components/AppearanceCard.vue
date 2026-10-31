@@ -8,6 +8,7 @@ import { useAppearance } from '@/composables/useAppearance'
 
 const { settings, load } = useAppearance()
 
+const cropBars = ref(false)
 const loadingStyle = ref<'minimal' | 'branded' | 'custom'>('minimal')
 const background = ref<string | null>(null)
 const noSignalImage = ref<string | null>(null)
@@ -31,6 +32,7 @@ function syncFromSettings() {
   loadingStyle.value = (settings.value.loading_style as typeof loadingStyle.value) || 'minimal'
   background.value = settings.value.loading_background || null
   noSignalImage.value = settings.value.no_signal_image || null
+  cropBars.value = !!settings.value.crop_bars
 
   const signal = (settings.value as Record<string, any>).signal || {}
   const preset = (signal.preset as string) || 'auto'
@@ -53,6 +55,7 @@ async function save() {
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        crop_bars: cropBars.value,
         loading_style: loadingStyle.value,
         loading_background: background.value,
         no_signal_image: noSignalImage.value,
@@ -198,6 +201,22 @@ async function pick(event: Event, target: 'bg' | 'ns') {
           </label>
         </div>
         <p v-else class="text-xs text-muted-foreground">已关闭：任何情况下都不会显示彩条/无信号画面。</p>
+      </section>
+
+      <!-- 黑边裁剪 -->
+      <section class="space-y-3 border-t pt-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p class="text-sm font-medium">自动裁掉黑边</p>
+            <p class="text-xs text-muted-foreground">
+              采集卡给非 16:9 信号补的左右/上下黑边，按内容区裁剪显示（网页端生效）。
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <Button size="sm" :variant="cropBars ? 'default' : 'outline'" @click="cropBars = true">开启</Button>
+            <Button size="sm" :variant="!cropBars ? 'default' : 'outline'" @click="cropBars = false">关闭</Button>
+          </div>
+        </div>
       </section>
 
       <div class="flex items-center gap-3 border-t pt-4">

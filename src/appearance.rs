@@ -37,6 +37,8 @@ pub struct AppearanceSettings {
     pub no_signal_image: Option<String>,
     /// 无信号检测设置
     pub signal: Option<SignalProbeSettings>,
+    /// 自动裁掉采集卡补的黑边（按画面实际内容区裁剪显示）
+    pub crop_bars: Option<bool>,
 }
 
 static CACHE: OnceLock<RwLock<Arc<AppearanceSettings>>> = OnceLock::new();

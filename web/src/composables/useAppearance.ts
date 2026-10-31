@@ -4,6 +4,7 @@ export interface AppearanceSettings {
   loading_style?: string | null
   loading_background?: string | null
   no_signal_image?: string | null
+  crop_bars?: boolean | null
 }
 
 const settings = ref<AppearanceSettings>({})
