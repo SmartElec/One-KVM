@@ -93,9 +93,6 @@ const videoSession = useVideoSession()
 const { settings: appearance, load: loadAppearance } = useAppearance()
 void loadAppearance()
 
-// 采集卡给非 16:9 信号补的黑边：按画面实际内容区裁剪显示
-const cropBars = computed(() => appearance.value.crop_bars === true)
-
 const consoleEvents = useConsoleEvents({
   onStreamConfigChanging: handleStreamConfigChanging,
   onStreamConfigApplied: handleStreamConfigApplied,
@@ -128,7 +125,6 @@ function setVideoRotation(rotation: VideoRotation) {
 const videoRef = ref<HTMLImageElement | null>(null)
 const webrtcVideoRef = ref<HTMLVideoElement | null>(null)
 const videoContainerRef = ref<HTMLDivElement | null>(null)
-const videoContentRef = ref<HTMLDivElement | null>(null)
 const isFullscreen = ref(false)
 const videoLoading = ref(true)
 const videoError = ref(false)
@@ -153,8 +149,6 @@ const {
   contentStyle: videoContentStyle,
   updateSourceSize: updateVideoSourceSize,
   setScaleMode: setVideoScaleMode,
-  mediaStyle: videoMediaStyle,
-  setCropRect,
 } = useVideoScaling({ rotation: videoRotation })
 
 const backendFps = ref(0)
@@ -2282,12 +2276,6 @@ function getActiveVideoAspectRatio(): number | null {
 }
 
 function getRenderedVideoRect() {
-  // 裁剪显示时，可见区域就是内容盒本身
-  if (cropActive.value) {
-    const contentRect = videoContentRef.value?.getBoundingClientRect()
-    if (contentRect && contentRect.width > 0 && contentRect.height > 0) return contentRect
-  }
-
   const videoElement = getActiveVideoElement()
   if (!videoElement) return null
 
@@ -2431,31 +2419,9 @@ function probeVideoContentRect() {
 
 function getVideoContentRect() {
   if (videoRotation.value === 90 || videoRotation.value === 270) return null
-  // 已在裁剪显示时，坐标已经是内容区，不能再映射一次
-  if (cropActive.value) return null
   probeVideoContentRect()
   return videoContentRect.value
 }
-
-const cropActive = computed(() => cropBars.value && !!videoContentRect.value)
-
-watch(
-  [cropBars, videoContentRect],
-  () => {
-    if (!cropBars.value) {
-      setCropRect(null)
-      return
-    }
-    setCropRect(videoContentRect.value)
-  },
-  { immediate: true },
-)
-
-// 不移动鼠标时也要持续探测，源分辨率变化后裁剪框要跟着更新
-const cropProbeTimer = window.setInterval(() => {
-  if (cropBars.value) probeVideoContentRect()
-}, 1500)
-onUnmounted(() => window.clearInterval(cropProbeTimer))
 
 function getAbsoluteMousePosition(e: MouseEvent) {
   const rect = getRenderedVideoRect()
@@ -3515,14 +3481,13 @@ onUnmounted(() => {
               @wheel.prevent="handleWheel"
               @contextmenu="handleContextMenu"
             >
-              <div ref="videoContentRef" class="relative shrink-0" :style="videoContentStyle">
+              <div class="relative shrink-0" :style="videoContentStyle">
                 <img
                   v-show="videoMode === 'mjpeg'"
                   ref="videoRef"
                   :src="mjpegUrl"
                   class="size-full object-contain pointer-events-none select-none transition-opacity ease-out"
                   :class="videoFrameReady ? 'opacity-100 duration-700' : 'opacity-0 duration-150'"
-                  :style="videoMediaStyle"
                   :alt="t('console.videoAlt')"
                   draggable="false"
                   @load="handleVideoLoad"
@@ -3533,7 +3498,6 @@ onUnmounted(() => {
                   ref="webrtcVideoRef"
                   class="size-full object-contain pointer-events-none transition-opacity ease-out"
                   :class="videoFrameReady ? 'opacity-100 duration-700' : 'opacity-0 duration-150'"
-                  :style="videoMediaStyle"
                   autoplay
                   playsinline
                   @loadedmetadata="handleWebRTCVideoResize"
