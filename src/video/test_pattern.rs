@@ -99,6 +99,19 @@ pub fn jpeg_bars(width: usize, height: usize) -> Vec<u8> {
 // 自定义「无信号」画面：优先用用户上传的图片，没有就退回彩条
 // ---------------------------------------------------------------------------
 
+/// 内置默认无信号画面：从采集卡芯片直接抓的原生 8 段彩条。
+/// 用户没上传自定义图片时用它，保证开箱即与硬件输出一致（而不是软件生成的近似彩条）。
+const DEFAULT_NO_SIGNAL_JPEG: &[u8] = include_bytes!("../../res/no-signal.jpg");
+
+/// 解码 JPEG 为 RGB，失败返回 None
+fn decode_jpeg_rgb(bytes: &[u8]) -> Option<(Vec<u8>, usize, usize)> {
+    let image = turbojpeg::decompress(bytes, turbojpeg::PixelFormat::RGB).ok()?;
+    if image.format != turbojpeg::PixelFormat::RGB {
+        return None;
+    }
+    Some((image.pixels, image.width, image.height))
+}
+
 fn data_url_hash(data_url: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in data_url.as_bytes() {
@@ -114,11 +127,7 @@ fn decode_data_url_rgb(data_url: &str) -> Option<(Vec<u8>, usize, usize)> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(payload)
         .ok()?;
-    let image = turbojpeg::decompress(&bytes, turbojpeg::PixelFormat::RGB).ok()?;
-    if image.format != turbojpeg::PixelFormat::RGB {
-        return None;
-    }
-    Some((image.pixels, image.width, image.height))
+    decode_jpeg_rgb(&bytes)
 }
 
 /// 最近邻缩放 + RGB->YUYV（一次性开销，按图片+分辨率缓存）
@@ -184,17 +193,19 @@ fn yuyv_to_jpeg(yuyv: &[u8], width: usize, height: usize) -> Vec<u8> {
 /// 用户自定义的无信号画面（YUYV）；未配置或解码失败返回 None
 pub fn custom_no_signal_yuyv(width: usize, height: usize) -> Option<Arc<Vec<u8>>> {
     let appearance = crate::appearance::current();
-    let data_url = appearance.no_signal_image.as_deref()?;
-    if data_url.is_empty() {
-        return None;
-    }
-    let key = (data_url_hash(data_url), width & !1, height & !1);
+    let data_url = appearance.no_signal_image.as_deref().unwrap_or("");
+    // 0 表示内置默认图，避免和用户图片哈希撞车
+    let key = (if data_url.is_empty() { 0 } else { data_url_hash(data_url) }, width & !1, height & !1);
     static CACHE: OnceLock<Mutex<HashMap<(u64, usize, usize), Arc<Vec<u8>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(found) = cache.lock().ok().and_then(|m| m.get(&key).cloned()) {
         return Some(found);
     }
-    let (rgb, sw, sh) = decode_data_url_rgb(data_url)?;
+    let (rgb, sw, sh) = if data_url.is_empty() {
+        decode_jpeg_rgb(DEFAULT_NO_SIGNAL_JPEG)?
+    } else {
+        decode_data_url_rgb(data_url)?
+    };
     let frame = Arc::new(rgb_to_yuyv_scaled(&rgb, sw, sh, key.1, key.2));
     if let Ok(mut map) = cache.lock() {
         map.clear();

@@ -33,6 +33,23 @@ WORK=/tmp/one-kvm-deb-work
 rm -rf "$WORK"
 dpkg-deb -R "$SOURCE_DEB" "$WORK"
 
+# 内置 systemd drop-in：静态画面跳过。
+# 这是"装了就对"的关键——之前靠部署脚本手工建，全新镜像会漏，
+# 表现为画面静止时帧率显示不再跳动。
+mkdir -p "$WORK/etc/systemd/system/one-kvm.service.d"
+cat > "$WORK/etc/systemd/system/one-kvm.service.d/skip-static.conf" <<'CONF'
+[Service]
+Environment=ONE_KVM_SKIP_STATIC=1
+Environment=ONE_KVM_SKIP_ROWS=4
+CONF
+
+# postinst 补 daemon-reload，否则新装进的 drop-in 不会生效
+sed -i 's|^            systemctl enable one-kvm$|            systemctl daemon-reload\n            systemctl enable one-kvm|' "$WORK/DEBIAN/postinst"
+if ! grep -q 'daemon-reload' "$WORK/DEBIAN/postinst"; then
+    echo "ERROR: postinst 里没插入 daemon-reload（上游脚本可能变了）"
+    exit 1
+fi
+
 mkdir -p "$WORK/usr/share/one-kvm"
 cat > "$WORK/usr/share/one-kvm/build-info.txt" <<EOF
 version: ${VERSION}
