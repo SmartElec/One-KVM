@@ -55,9 +55,9 @@ jobs:
       - name: Install cross
         run: cargo install cross --version 0.2.5 --locked
       - name: Build linux binary
-        run: bash build/build-images.sh
+        run: bash build/build-images.sh arm64
       - name: Package deb
-        run: bash build/package-deb.sh
+        run: bash build/package-deb.sh arm64
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
