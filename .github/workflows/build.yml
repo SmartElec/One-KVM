@@ -1,0 +1,67 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: arounyf/One-KVM
+          ref: perf/yuyv-dma-no-signal
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm install
+          npm run build
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  deb:
+    runs-on: ubuntu-22.04
+    needs: frontend
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: arounyf/One-KVM
+          ref: perf/yuyv-dma-no-signal
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-cross-release
+          key: ${{ hashFiles('Cross.toml', 'build/cross/Dockerfile.*') }}
+          cache-all-crates: true
+      - name: Install cross
+        run: cargo install cross --version 0.2.5 --locked
+      - name: Build linux binary
+        run: bash build/build-images.sh
+      - name: Package deb
+        run: bash build/package-deb.sh
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-kvm-deb
+          path: target/debian/*.deb
+          if-no-files-found: error
+          retention-days: 7
